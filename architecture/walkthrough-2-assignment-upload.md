@@ -1,13 +1,92 @@
-### Walkthrough 2: Assignment Submission and Asynchronous Processing
 
-The second walkthrough was simulated using Cloud Architecture Lab.
+# Walkthrough 2: Assignment Submission and Asynchronous Processing
 
-The student initiated a POST request to `/api/submissions/confirm`. The request passed through Amazon CloudFront and the Application Load Balancer, which selected a healthy EC2 API instance in Availability Zone A.
+## 1. Introduction
 
-The API accessed Amazon SQS through the simulated private subnet routing and NAT Gateway. IAM authorization was successful, allowing the API to perform the `sqs:SendMessage` operation.
+This walkthrough demonstrates the proposed asynchronous assignment submission workflow using Cloud Architecture Lab.
 
-Amazon SQS accepted the message, and Marking Worker AZ-A successfully received, processed, and deleted it. The student received an HTTP 202 response.
+The architecture uses Amazon SQS and a background marking worker to separate assignment processing from the initial API request.
 
-All 11 simulation steps completed successfully, with a simulated response time of 89 milliseconds at a configured load of 10 requests per second.
+The simulated workflow focuses on submission confirmation, message delivery, authorization, and asynchronous worker processing.
 
-This simulation verifies the submission-confirmation and asynchronous processing path. The actual 40 MB S3 upload, file-size validation, database persistence, and tutor email delivery require separate verification during implementation.
+## 2. Assignment Submission Simulation
+
+The student initiated a POST request to `/api/submissions/confirm`.
+
+The request passed through Amazon CloudFront and the Application Load Balancer (ALB).
+
+The ALB selected a healthy EC2 API instance in Availability Zone A.
+
+The API accessed Amazon SQS through the simulated private subnet routing and NAT Gateway.
+
+IAM authorization succeeded, allowing the API to perform the `sqs:SendMessage` operation.
+
+Amazon SQS accepted the message.
+
+Marking Worker AZ-A received, processed, and deleted the message.
+
+The student received an HTTP 202 response.
+
+![Asynchronous Assignment Submission](../evidence/cloud-architecture-lab/walkthrough-2-upload.png)
+
+**Figure 1:** Cloud Architecture Lab simulation showing successful asynchronous assignment submission through SQS and the marking worker, returning HTTP 202.
+
+## 3. Asynchronous Processing Workflow
+
+The simulated request followed these main stages:
+
+1. The student submitted the assignment confirmation request.
+2. CloudFront forwarded the request toward the application.
+3. The Application Load Balancer routed the request to an EC2 API instance.
+4. The API accessed Amazon SQS using the configured network route.
+5. IAM authorization permitted the SQS message operation.
+6. Amazon SQS accepted the message.
+7. The marking worker received and processed the message.
+8. The message was deleted after processing.
+9. The application returned HTTP 202 to the student.
+
+![Assignment Processing Workflow](../evidence/cloud-architecture-lab/walkthrough-2-upload-1.png)
+
+**Figure 2:** Cloud Architecture Lab simulation timeline showing request routing, IAM authorization, SQS message delivery, and background worker processing.
+
+## 4. Simulation Results
+
+| Test | Result |
+|---|---|
+| Submission endpoint | `POST /api/submissions/confirm` |
+| HTTP response | 202 Accepted |
+| SQS message authorization | Successful |
+| SQS message delivery | Successful |
+| Background worker processing | Successful |
+| Simulation steps | 11 completed |
+| Configured request load | 10 requests/second |
+| Reported response time | 89 ms |
+| Overall simulation status | Passed |
+
+All 11 simulation steps completed successfully.
+
+The HTTP 202 response indicates that the simulated submission request was accepted for asynchronous processing.
+
+## 5. Limitations
+
+The simulation verifies the proposed submission-confirmation and asynchronous processing path.
+
+The following features were not independently verified by this simulation:
+
+- Actual 40 MB assignment file upload to Amazon S3.
+- Assignment file-size validation.
+- Assignment metadata persistence in PostgreSQL.
+- Tutor email notification delivery.
+- Production AWS performance and reliability.
+
+These features require separate implementation and testing.
+
+## 6. Conclusion
+
+The Cloud Architecture Lab simulation successfully demonstrated the proposed asynchronous assignment processing workflow.
+
+The simulated API request, IAM authorization, SQS message delivery, and marking worker processing completed successfully.
+
+The student received HTTP 202, with a reported simulation response time of 89 milliseconds.
+
+Further testing is required to verify actual file uploads, database persistence, and notification delivery in a deployed environment.

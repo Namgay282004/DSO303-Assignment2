@@ -12,6 +12,10 @@ The platform supports approximately 8,000 students and 400 staff. It handles 300
 
 The architecture uses two Availability Zones to improve reliability, scalability, security, and fault tolerance.
 
+![Proposed AWS Architecture](../evidence/cloud-architecture-lab/full-architecture.png)
+
+**Figure 1:** Proposed AWS architecture for the University Online Examination and Assignment Submission Platform.
+
 ## 2. AWS Service Selection and Justification
 
 ### 2.1 Networking and Content Delivery
@@ -134,7 +138,53 @@ The following simulation results have been observed:
 
 The simulations demonstrate the modeled request paths and failure behavior. They do not replace actual AWS deployment tests.
 
-## 7. Conclusion
+## 7. Implementation Status
+
+The project includes a proposed AWS architecture, Terraform infrastructure configuration, Cloud Architecture Lab simulations, and a locally deployed examination platform.
+
+| Component | Implementation Status |
+|---|---|
+| AWS VPC and subnet networking | Configured using Terraform |
+| Security groups and IAM | Infrastructure configuration prepared |
+| EC2, ALB and Auto Scaling | Proposed architecture and infrastructure configuration |
+| Amazon RDS Multi-AZ | Proposed architecture and simulated behavior |
+| Amazon S3 and SQS | Proposed architecture and simulated workflows |
+| Amazon Cognito | Proposed authentication service; not integrated into the local application |
+| Amazon CloudWatch | Proposed monitoring service |
+| React frontend | Implemented and tested locally |
+| Express backend | Implemented and tested locally |
+| PostgreSQL | Running locally using Docker |
+| Docker Compose | Implemented and verified |
+| GitHub Actions | Docker image builds completed successfully |
+| AWS production deployment | Not completed |
+
+### 7.1 Local Implementation
+
+The working application uses React, Express, PostgreSQL, Docker and Nginx.
+
+Student authentication uses JWT-based authentication implemented in the backend rather than Amazon Cognito.
+
+The application supports student login, examination viewing, examination attempts, answer submission and released result viewing.
+
+### 7.2 Cloud Architecture Lab
+
+The Cloud Architecture Lab was used to simulate examination requests, asynchronous processing and Availability Zone failures.
+
+These simulations demonstrate the proposed architecture's behavior but do not represent actual AWS production deployment.
+
+### 7.3 CI/CD Implementation
+
+GitHub Actions automatically builds the backend and frontend Docker images when changes are pushed to the `main` branch.
+
+The workflow performs continuous integration checks. Automated AWS deployment has not been implemented.
+
+### 7.4 Production Limitations
+
+The proposed architecture targets high availability, scalability and fault tolerance. However, actual AWS load testing, Multi-AZ failover, monitoring and recovery performance have not yet been verified.
+
+The current implementation should therefore be described as a locally tested application with a proposed AWS production architecture.
+
+## 8. Conclusion
 
 The selected AWS services provide a foundation for a scalable, secure, and highly available university examination platform.
 
