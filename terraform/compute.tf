@@ -77,6 +77,7 @@ resource "aws_launch_template" "api" {
     ECR_REPOSITORY="${aws_ecr_repository.backend.repository_url}"
     DB_HOST="${aws_db_instance.postgres.address}"
     DB_SECRET_ARN="${aws_db_instance.postgres.master_user_secret[0].secret_arn}"
+    JWT_SECRET_ARN="${data.aws_secretsmanager_secret.jwt_signing_key.arn}"
 
     # Install Docker and AWS CLI.
     # Requires outbound connectivity through NAT.
@@ -97,18 +98,34 @@ resource "aws_launch_template" "api" {
     DB_PASSWORD=$(printf '%s' "$DB_SECRET" | jq -r '.password')
     unset DB_SECRET
 
+    # Retrieve JWT signing key from AWS Secrets Manager.
+    # Never print the secret to logs.
+    JWT_SECRET_VALUE=$(aws secretsmanager get-secret-value \
+      --region "$REGION" \
+      --secret-id "$JWT_SECRET_ARN" \
+      --query SecretString \
+      --output text)
+
     # Create an environment file with restricted permissions.
     install -d -m 700 /etc/dso303
 
     ENV_FILE="/etc/dso303/backend.env"
 
-    printf 'NODE_ENV=production\nPORT=3000\nDB_HOST=%s\nDB_PORT=5432\nDB_USER=%s\nDB_NAME=dso303\n' \
+    printf 'NODE_ENV=production\nPORT=3000\nDB_HOST=%s\nDB_PORT=5432\nDB_USER=%s\nDB_NAME=dso303\nAWS_REGION=ap-south-1\nS3_SUBMISSIONS_BUCKET=${aws_s3_bucket.assignments.bucket}\n' \
       "$DB_HOST" "$DB_USER" > "$ENV_FILE"
 
     # Append the password without exposing it in Terraform.
     printf 'DB_PASSWORD=%s\n' "$DB_PASSWORD" >> "$ENV_FILE"
+
+    # Add JWT configuration.
+    printf 'JWT_SECRET=%s\n' "$JWT_SECRET_VALUE" >> "$ENV_FILE"
+    printf 'JWT_EXPIRES_IN=2h\n' >> "$ENV_FILE"
+        printf 'SQS_MARKING_QUEUE_URL=%s\n' '${aws_sqs_queue.marking.url}' >> "$ENV_FILE"
+
     chmod 600 "$ENV_FILE"
+
     unset DB_PASSWORD
+    unset JWT_SECRET_VALUE
 
     # Authenticate Docker to Amazon ECR.
     aws ecr get-login-password --region "$REGION" \
@@ -118,7 +135,7 @@ resource "aws_launch_template" "api" {
           "$(echo "$ECR_REPOSITORY" | cut -d/ -f1)"
 
     # Download the published backend image.
-    docker pull "$ECR_REPOSITORY:latest"
+    docker pull "$ECR_REPOSITORY:${var.backend_image_tag}"
 
     # Start the actual Node.js backend.
     docker run -d \
@@ -126,7 +143,7 @@ resource "aws_launch_template" "api" {
       --restart unless-stopped \
       --env-file "$ENV_FILE" \
       -p 3000:3000 \
-      "$ECR_REPOSITORY:latest"
+      "$ECR_REPOSITORY:${var.backend_image_tag}"
 
     echo "DSO303 backend container started"
   EOF
@@ -153,8 +170,10 @@ resource "aws_autoscaling_group" "api" {
     strategy = "Rolling"
 
     preferences {
-      min_healthy_percentage = 50
+      min_healthy_percentage = 100
+      max_healthy_percentage = 200
       instance_warmup        = 180
+      auto_rollback          = true
     }
   }
 
@@ -168,7 +187,7 @@ resource "aws_autoscaling_group" "api" {
 
   # Keep instances stopped until deployment is ready.
   min_size         = 0
-  desired_capacity = 0
+  desired_capacity = 1
   max_size         = 2
 
   health_check_type         = "ELB"
@@ -197,5 +216,10 @@ resource "aws_autoscaling_group" "api" {
 
   lifecycle {
     create_before_destroy = true
+
+    # GitHub Actions manages the deployed launch template version.
+    ignore_changes = [
+      launch_template[0].version
+    ]
   }
 }

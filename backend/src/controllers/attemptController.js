@@ -1,6 +1,6 @@
 
 const pool = require("../config/db");
-const { markMCQ } = require("../services/markingService");
+const { queueMarking } = require("../services/markingQueue");
 
 // Start an exam attempt
 exports.startAttempt = async (req, res) => {
@@ -218,13 +218,11 @@ exports.getSavedAnswers = async (req, res) => {
 
 // Submit an exam attempt
 exports.submitAttempt = async (req, res) => {
-  const attempt_id = Number(req.params.id);
-  const student_id = req.user.id;
+  const attemptId = Number(req.params.id);
+  const studentId = req.user.id;
 
-  if (!Number.isInteger(attempt_id) || attempt_id <= 0) {
-    return res.status(400).json({
-      error: "Invalid attempt ID"
-    });
+  if (!Number.isInteger(attemptId) || attemptId <= 0) {
+    return res.status(400).json({ error: "Invalid attempt ID" });
   }
 
   let client;
@@ -235,25 +233,22 @@ exports.submitAttempt = async (req, res) => {
 
     const result = await client.query(
       `SELECT ea.id, ea.student_id, ea.status,
-              ea.started_at, e.start_time,
-              e.duration_minutes
+              ea.started_at, e.start_time, e.duration_minutes
        FROM exam_attempts ea
        JOIN exams e ON e.id = ea.exam_id
        WHERE ea.id = $1
        FOR UPDATE OF ea`,
-      [attempt_id]
+      [attemptId]
     );
 
     if (result.rowCount === 0) {
       await client.query("ROLLBACK");
-      return res.status(404).json({
-        error: "Exam attempt not found"
-      });
+      return res.status(404).json({ error: "Exam attempt not found" });
     }
 
     const attempt = result.rows[0];
 
-    if (attempt.student_id !== student_id) {
+    if (attempt.student_id !== studentId) {
       await client.query("ROLLBACK");
       return res.status(403).json({
         error: "You cannot submit another student's attempt"
@@ -263,28 +258,35 @@ exports.submitAttempt = async (req, res) => {
     if (attempt.status !== "in_progress") {
       await client.query("ROLLBACK");
       return res.status(409).json({
-        error: "Exam already submitted or unavailable"
+        error: "Exam already submitted"
       });
     }
 
     const updated = await client.query(
       `UPDATE exam_attempts
-       SET status = 'submitted',
-           submitted_at = NOW()
+       SET status = 'submitted', submitted_at = NOW()
        WHERE id = $1
        RETURNING *`,
-      [attempt_id]
+      [attemptId]
     );
 
-    // Automatically mark MCQ questions before committing
-    await markMCQ(attempt_id, client);
-
-    // Commit submission and marking together
     await client.query("COMMIT");
+
+    try {
+      await queueMarking(attemptId);
+    } catch (queueError) {
+      console.error("Failed to queue marking:", queueError.message);
+      return res.status(202).json({
+        message: "Exam submitted; marking is pending",
+        attempt: updated.rows[0],
+        marking_queued: false
+      });
+    }
 
     return res.status(200).json({
       message: "Exam submitted successfully",
-      attempt: updated.rows[0]
+      attempt: updated.rows[0],
+      marking_queued: true
     });
   } catch (error) {
     if (client) {
@@ -292,7 +294,6 @@ exports.submitAttempt = async (req, res) => {
     }
 
     console.error(error.message);
-
     return res.status(500).json({
       error: "Unable to submit exam"
     });

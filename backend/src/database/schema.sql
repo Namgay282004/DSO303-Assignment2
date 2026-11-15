@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,
     full_name VARCHAR(150) NOT NULL,
     email VARCHAR(255) UNIQUE NOT NULL,
+    password_hash TEXT,
     role VARCHAR(20) NOT NULL
         CHECK (role IN ('student', 'tutor', 'admin')),
     created_at TIMESTAMPTZ DEFAULT NOW()

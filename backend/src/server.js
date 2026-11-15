@@ -7,6 +7,7 @@ const authRoutes = require("./routes/authRoutes");
 const express = require("express");
 const cors = require("cors");
 const pool = require("./config/db");
+const submissionRoutes = require("./routes/submissionRoutes");
 
 const app = express();
 
@@ -16,6 +17,7 @@ app.use("/api/results", resultRoutes);
 app.use("/api/exams", examRoutes);
 app.use("/api/attempts", attemptRoutes);
 app.use("/api/auth", authRoutes);
+app.use("/api/submissions", submissionRoutes);
 
 app.get("/health", (req, res) => {
   res.status(200).json({

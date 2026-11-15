@@ -43,7 +43,10 @@ resource "aws_iam_role" "github_deploy" {
         Condition = {
           StringEquals = {
             "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
-            "token.actions.githubusercontent.com:sub" = "repo:Namgay282004/DSO303-Assignment2:ref:refs/heads/main"
+
+            # Match the actual OIDC subject recorded in CloudTrail.
+            # Restrict access to this repository and main branch.
+            "token.actions.githubusercontent.com:sub" = "repo:Namgay282004@141105656/DSO303-Assignment2@1452386293:ref:refs/heads/main"
           }
         }
       }
@@ -82,6 +85,7 @@ resource "aws_iam_role_policy" "github_ecr_push" {
 
         Action = [
           "ecr:BatchCheckLayerAvailability",
+          "ecr:BatchGetImage",
           "ecr:CompleteLayerUpload",
           "ecr:InitiateLayerUpload",
           "ecr:PutImage",
@@ -168,3 +172,38 @@ resource "aws_iam_role_policy" "github_frontend_deploy" {
   })
 }
 
+# GitHub Actions: publish new EC2 launch template versions
+resource "aws_iam_role_policy" "github_launch_template_deploy" {
+  name = "DSO303-GitHub-Launch-Template-Deploy"
+  role = aws_iam_role.github_deploy.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ec2:DescribeLaunchTemplates",
+          "ec2:DescribeLaunchTemplateVersions",
+          "ec2:CreateLaunchTemplateVersion",
+          "ec2:ModifyLaunchTemplate"
+        ]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "autoscaling:DescribeAutoScalingGroups"
+        ]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "autoscaling:UpdateAutoScalingGroup"
+        ]
+        Resource = aws_autoscaling_group.api.arn
+      }
+    ]
+  })
+}

@@ -39,13 +39,18 @@ resource "aws_iam_role_policy" "api" {
     Version = "2012-10-17"
     Statement = [
       {
-        Effect   = "Allow"
-        Action   = ["sqs:SendMessage"]
+        Effect = "Allow"
+        Action = [
+          "sqs:SendMessage",
+          "sqs:ReceiveMessage",
+          "sqs:DeleteMessage",
+          "sqs:GetQueueAttributes"
+        ]
         Resource = aws_sqs_queue.marking.arn
       },
       {
         Effect = "Allow"
-        Action = ["s3:GetObject"]
+        Action = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
         Resource = [
           "${aws_s3_bucket.assignments.arn}/*"
         ]
@@ -159,4 +164,41 @@ resource "aws_iam_role_policy" "worker" {
 resource "aws_iam_instance_profile" "worker" {
   name = "DSO303-Assignment2-Worker-Profile"
   role = aws_iam_role.worker.name
+}
+
+
+
+# ----------------------------------------------------------
+# AWS Systems Manager access for backend EC2 instances
+# ----------------------------------------------------------
+
+resource "aws_iam_role_policy_attachment" "api_ssm" {
+  role       = aws_iam_role.api.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+# ----------------------------------------------------------
+# API Permissions for JWT Signing Secret
+# ----------------------------------------------------------
+
+data "aws_secretsmanager_secret" "jwt_signing_key" {
+  name = "dso303-assignment2/jwt-signing-key"
+}
+
+resource "aws_iam_role_policy" "api_jwt_secret" {
+  name = "DSO303-API-JWT-Secret-Policy"
+  role = aws_iam_role.api.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue"
+        ]
+        Resource = data.aws_secretsmanager_secret.jwt_signing_key.arn
+      }
+    ]
+  })
 }

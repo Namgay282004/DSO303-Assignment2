@@ -13,10 +13,11 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: dso303-deploy-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  # -------------------------------------------------------
-  # 1. Build and validate Docker images
-  # -------------------------------------------------------
   docker-build:
     name: Build Backend and Frontend
     runs-on: ubuntu-24.04
@@ -42,15 +43,12 @@ jobs:
           push: false
           tags: dso303-frontend:ci
 
-  # -------------------------------------------------------
-  # 2. Publish backend image to Amazon ECR
-  # -------------------------------------------------------
   publish-backend:
-    name: Publish Backend to Amazon ECR
+    name: Publish and Deploy Backend
     runs-on: ubuntu-24.04
     needs: docker-build
 
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
 
     permissions:
       id-token: write
@@ -82,35 +80,100 @@ jobs:
             ${{ steps.login-ecr.outputs.registry }}/dso303-assignment2-backend:latest
             ${{ steps.login-ecr.outputs.registry }}/dso303-assignment2-backend:${{ github.sha }}
 
-      # ---------------------------------------------------
-      # 3. Refresh EC2 instances after backend deployment
-      # ---------------------------------------------------
-      - name: Start EC2 Instance Refresh
+      - name: Deploy Backend to EC2 Auto Scaling Group
         env:
           ASG_NAME: ${{ vars.AWS_API_ASG_NAME }}
+          IMAGE_TAG: ${{ github.sha }}
         run: |
+          set -euo pipefail
+
           if [ -z "$ASG_NAME" ]; then
-            echo "::error::AWS_API_ASG_NAME is not configured."
+            echo "::error::AWS_API_ASG_NAME is missing"
             exit 1
           fi
 
-          echo "Starting instance refresh for $ASG_NAME"
+          ASG=$(aws autoscaling describe-auto-scaling-groups \
+            --auto-scaling-group-names "$ASG_NAME" \
+            --query 'AutoScalingGroups[0]' \
+            --output json)
+
+          LT_ID=$(echo "$ASG" | jq -r '.LaunchTemplate.LaunchTemplateId')
+          LT_VERSION=$(echo "$ASG" | jq -r '.LaunchTemplate.Version')
+
+          if [ -z "$LT_ID" ] || [ "$LT_ID" = "null" ]; then
+            echo "::error::Launch template ID not found"
+            exit 1
+          fi
+
+          if ! [[ "$LT_VERSION" =~ ^[0-9]+$ ]]; then
+            echo "::error::Expected a numbered launch template version"
+            exit 1
+          fi
+
+          # Read the existing bootstrap script.
+          aws ec2 describe-launch-template-versions \
+            --launch-template-id "$LT_ID" \
+            --versions "$LT_VERSION" \
+            --query 'LaunchTemplateVersions[0].LaunchTemplateData.UserData' \
+            --output text > /tmp/userdata.b64
+
+          # Replace both Docker image references with the new SHA.
+          python3 - <<'PY'
+          import base64
+          import os
+          import re
+
+          with open("/tmp/userdata.b64") as f:
+              encoded = f.read().strip()
+
+          script = base64.b64decode(encoded).decode("utf-8")
+          tag = os.environ["IMAGE_TAG"]
+
+          script, count = re.subn(
+              r'(\$ECR_REPOSITORY:)[A-Za-z0-9._-]+',
+              lambda match: match.group(1) + tag,
+              script
+          )
+
+          if count != 2:
+              raise SystemExit(
+                  f"Expected 2 Docker image references; found {count}"
+              )
+
+          with open("/tmp/new-userdata.b64", "w") as f:
+              f.write(base64.b64encode(script.encode()).decode())
+          PY
+
+          # Override only user data, inheriting all other settings.
+          jq -n --rawfile userdata /tmp/new-userdata.b64 \
+            '{UserData: ($userdata | gsub("\\n"; ""))}' \
+            > /tmp/launch-template-override.json
+
+          NEW_VERSION=$(aws ec2 create-launch-template-version \
+            --launch-template-id "$LT_ID" \
+            --source-version "$LT_VERSION" \
+            --launch-template-data file:///tmp/launch-template-override.json \
+            --query 'LaunchTemplateVersion.VersionNumber' \
+            --output text)
+
+          echo "Created launch template version $NEW_VERSION"
+
+          aws autoscaling update-auto-scaling-group \
+            --auto-scaling-group-name "$ASG_NAME" \
+            --launch-template "LaunchTemplateId=$LT_ID,Version=$NEW_VERSION"
 
           aws autoscaling start-instance-refresh \
             --auto-scaling-group-name "$ASG_NAME" \
-            --preferences '{"MinHealthyPercentage":50,"InstanceWarmup":180}'
+            --preferences '{"MinHealthyPercentage":100,"MaxHealthyPercentage":200,"InstanceWarmup":180,"AutoRollback":true}'
 
-          echo "Instance refresh requested successfully."
+          echo "Backend deployment started."
 
-  # -------------------------------------------------------
-  # 4. Deploy React frontend to Amazon S3 and CloudFront
-  # -------------------------------------------------------
   deploy-frontend:
     name: Deploy React Frontend
     runs-on: ubuntu-24.04
     needs: docker-build
 
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
 
     permissions:
       id-token: write
@@ -133,6 +196,8 @@ jobs:
 
       - name: Build React Frontend
         working-directory: ./frontend
+        env:
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
         run: npm run build
 
       - name: Configure AWS Credentials using OIDC
@@ -146,13 +211,8 @@ jobs:
           FRONTEND_BUCKET: ${{ vars.AWS_FRONTEND_BUCKET }}
           CLOUDFRONT_ID: ${{ vars.AWS_CLOUDFRONT_DISTRIBUTION_ID }}
         run: |
-          if [ -z "$FRONTEND_BUCKET" ]; then
-            echo "::error::AWS_FRONTEND_BUCKET is missing."
-            exit 1
-          fi
-
-          if [ -z "$CLOUDFRONT_ID" ]; then
-            echo "::error::AWS_CLOUDFRONT_DISTRIBUTION_ID is missing."
+          if [ -z "$FRONTEND_BUCKET" ] || [ -z "$CLOUDFRONT_ID" ]; then
+            echo "::error::Frontend deployment variables are missing"
             exit 1
           fi
 
@@ -160,10 +220,7 @@ jobs:
         env:
           FRONTEND_BUCKET: ${{ vars.AWS_FRONTEND_BUCKET }}
         run: |
-          aws s3 sync frontend/dist/ "s3://$FRONTEND_BUCKET/" \
-            --delete
-
-          echo "Frontend files uploaded successfully."
+          aws s3 sync frontend/dist/ "s3://$FRONTEND_BUCKET/" --delete
 
       - name: Invalidate CloudFront Cache
         env:
@@ -173,4 +230,3 @@ jobs:
             --distribution-id "$CLOUDFRONT_ID" \
             --paths "/*"
 
-          echo "CloudFront invalidation requested successfully."
