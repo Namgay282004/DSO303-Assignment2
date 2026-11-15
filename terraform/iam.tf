@@ -1,5 +1,13 @@
 
-# IAM role for API EC2 instances
+# ==========================================================
+# DSO303 Assignment 2
+# IAM Roles, Policies, and Instance Profiles
+# ==========================================================
+
+# ----------------------------------------------------------
+# 1. IAM Role for API EC2 Instances
+# ----------------------------------------------------------
+
 resource "aws_iam_role" "api" {
   name = "DSO303-Assignment2-API-Role"
 
@@ -19,7 +27,10 @@ resource "aws_iam_role" "api" {
   }
 }
 
-# API permissions
+# ----------------------------------------------------------
+# 2. API Permissions for SQS and S3
+# ----------------------------------------------------------
+
 resource "aws_iam_role_policy" "api" {
   name = "DSO303-API-Policy"
   role = aws_iam_role.api.id
@@ -43,12 +54,54 @@ resource "aws_iam_role_policy" "api" {
   })
 }
 
+# ----------------------------------------------------------
+# 3. API Permissions for Amazon ECR
+# ----------------------------------------------------------
+
+# Allows EC2 to authenticate to ECR and pull Docker images.
+resource "aws_iam_role_policy_attachment" "api_ecr_read" {
+  role       = aws_iam_role.api.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPullOnly"
+}
+
+# ----------------------------------------------------------
+# 4. API Permissions for AWS Secrets Manager
+# ----------------------------------------------------------
+
+# Allows the API to retrieve the RDS-managed master password.
+# Access is restricted to the specific RDS secret.
+
+resource "aws_iam_role_policy" "api_db_secret" {
+  name = "DSO303-API-Database-Secret-Policy"
+  role = aws_iam_role.api.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue"
+        ]
+        Resource = aws_db_instance.postgres.master_user_secret[0].secret_arn
+      }
+    ]
+  })
+}
+
+# ----------------------------------------------------------
+# 5. API EC2 Instance Profile
+# ----------------------------------------------------------
+
 resource "aws_iam_instance_profile" "api" {
   name = "DSO303-Assignment2-API-Profile"
   role = aws_iam_role.api.name
 }
 
-# IAM role for Marking Worker EC2 instances
+# ----------------------------------------------------------
+# 6. IAM Role for Marking Worker EC2 Instances
+# ----------------------------------------------------------
+
 resource "aws_iam_role" "worker" {
   name = "DSO303-Assignment2-Worker-Role"
 
@@ -68,7 +121,10 @@ resource "aws_iam_role" "worker" {
   }
 }
 
-# Worker permissions
+# ----------------------------------------------------------
+# 7. Worker Permissions for SQS and S3
+# ----------------------------------------------------------
+
 resource "aws_iam_role_policy" "worker" {
   name = "DSO303-Worker-Policy"
   role = aws_iam_role.worker.id
@@ -95,6 +151,10 @@ resource "aws_iam_role_policy" "worker" {
     ]
   })
 }
+
+# ----------------------------------------------------------
+# 8. Worker EC2 Instance Profile
+# ----------------------------------------------------------
 
 resource "aws_iam_instance_profile" "worker" {
   name = "DSO303-Assignment2-Worker-Profile"

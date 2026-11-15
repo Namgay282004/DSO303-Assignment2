@@ -36,3 +36,19 @@ crash.*.log
 # Temporary files
 *.tmp
 *.bak
+
+# Terraform local state and sensitive files
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+*.tfvars.json
+crash.log
+crash.*.log
+
+# Terraform review output
+terraform/*-review.txt
+terraform/deployment-review.txt
+terraform/final-review.txt
+terraform/multi-az-review.txt

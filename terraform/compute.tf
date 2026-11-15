@@ -2,10 +2,11 @@
 # ==========================================================
 # DSO303 Assignment 2
 # EC2 Launch Template and Auto Scaling Group
-# Configuration only - do not apply yet
+# Docker-based Node.js API Deployment
 # ==========================================================
 
-# Find the latest Amazon Linux 2023 AMI
+data "aws_region" "current" {}
+
 data "aws_ami" "amazon_linux_2023" {
   most_recent = true
   owners      = ["amazon"]
@@ -31,10 +32,9 @@ data "aws_ami" "amazon_linux_2023" {
   }
 }
 
-# Launch template for API instances
 resource "aws_launch_template" "api" {
   name_prefix   = "dso303-api-"
-  description   = "Launch template for Assignment 2 API"
+  description   = "Docker-based Node.js API for DSO303 Assignment 2"
   image_id      = data.aws_ami.amazon_linux_2023.id
   instance_type = "t3.micro"
 
@@ -65,48 +65,70 @@ resource "aws_launch_template" "api" {
     }
   }
 
-  # Placeholder bootstrap: creates a health endpoint only.
-  # The real API deployment will be added later.
   user_data = base64encode(<<-EOF
     #!/bin/bash
-    set -euxo pipefail
+    set -euo pipefail
 
-    mkdir -p /opt/dso303
+    exec > >(tee /var/log/dso303-bootstrap.log | logger -t dso303-bootstrap) 2>&1
 
-    cat > /opt/dso303/health-server.py <<'PY'
-    from http.server import BaseHTTPRequestHandler, HTTPServer
+    echo "Starting DSO303 backend deployment"
 
-    class Handler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            if self.path == "/health":
-                self.send_response(200)
-                self.send_header("Content-Type", "text/plain")
-                self.end_headers()
-                self.wfile.write(b"healthy")
-            else:
-                self.send_response(404)
-                self.end_headers()
+    REGION="${data.aws_region.current.region}"
+    ECR_REPOSITORY="${aws_ecr_repository.backend.repository_url}"
+    DB_HOST="${aws_db_instance.postgres.address}"
+    DB_SECRET_ARN="${aws_db_instance.postgres.master_user_secret[0].secret_arn}"
 
-    HTTPServer(("0.0.0.0", 80), Handler).serve_forever()
-    PY
+    # Install Docker and AWS CLI.
+    # Requires outbound connectivity through NAT.
+    dnf install -y docker awscli jq
 
-    cat > /etc/systemd/system/dso303-health.service <<'UNIT'
-    [Unit]
-    Description=DSO303 Placeholder Health Endpoint
-    After=network.target
+    systemctl enable --now docker
 
-    [Service]
-    Type=simple
-    ExecStart=/usr/bin/python3 /opt/dso303/health-server.py
-    Restart=always
-    RestartSec=5
+    # Retrieve the RDS-managed credentials.
+    # Never print the secret to the bootstrap log.
+    set +x
+    DB_SECRET=$(aws secretsmanager get-secret-value \
+      --region "$REGION" \
+      --secret-id "$DB_SECRET_ARN" \
+      --query SecretString \
+      --output text)
 
-    [Install]
-    WantedBy=multi-user.target
-    UNIT
+    DB_USER=$(printf '%s' "$DB_SECRET" | jq -r '.username')
+    DB_PASSWORD=$(printf '%s' "$DB_SECRET" | jq -r '.password')
+    unset DB_SECRET
 
-    systemctl daemon-reload
-    systemctl enable --now dso303-health.service
+    # Create an environment file with restricted permissions.
+    install -d -m 700 /etc/dso303
+
+    ENV_FILE="/etc/dso303/backend.env"
+
+    printf 'NODE_ENV=production\nPORT=3000\nDB_HOST=%s\nDB_PORT=5432\nDB_USER=%s\nDB_NAME=dso303\n' \
+      "$DB_HOST" "$DB_USER" > "$ENV_FILE"
+
+    # Append the password without exposing it in Terraform.
+    printf 'DB_PASSWORD=%s\n' "$DB_PASSWORD" >> "$ENV_FILE"
+    chmod 600 "$ENV_FILE"
+    unset DB_PASSWORD
+
+    # Authenticate Docker to Amazon ECR.
+    aws ecr get-login-password --region "$REGION" \
+      | docker login \
+          --username AWS \
+          --password-stdin \
+          "$(echo "$ECR_REPOSITORY" | cut -d/ -f1)"
+
+    # Download the published backend image.
+    docker pull "$ECR_REPOSITORY:latest"
+
+    # Start the actual Node.js backend.
+    docker run -d \
+      --name dso303-backend \
+      --restart unless-stopped \
+      --env-file "$ENV_FILE" \
+      -p 3000:3000 \
+      "$ECR_REPOSITORY:latest"
+
+    echo "DSO303 backend container started"
   EOF
   )
 
@@ -124,8 +146,19 @@ resource "aws_launch_template" "api" {
   }
 }
 
-# Auto Scaling Group spanning two Availability Zones
 resource "aws_autoscaling_group" "api" {
+
+
+  instance_refresh {
+    strategy = "Rolling"
+
+    preferences {
+      min_healthy_percentage = 50
+      instance_warmup        = 180
+    }
+  }
+
+
   name_prefix = "dso303-api-asg-"
 
   vpc_zone_identifier = [
@@ -133,8 +166,7 @@ resource "aws_autoscaling_group" "api" {
     aws_subnet.private_app_b.id
   ]
 
-  # Initial capacity is deliberately zero to avoid
-  # launching EC2 instances if configuration is applied.
+  # Keep instances stopped until deployment is ready.
   min_size         = 0
   desired_capacity = 0
   max_size         = 2
@@ -144,7 +176,7 @@ resource "aws_autoscaling_group" "api" {
 
   launch_template {
     id      = aws_launch_template.api.id
-    version = "$Latest"
+    version = aws_launch_template.api.latest_version
   }
 
   target_group_arns = [

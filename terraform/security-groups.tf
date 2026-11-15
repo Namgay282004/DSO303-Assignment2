@@ -19,13 +19,25 @@ resource "aws_vpc_security_group_ingress_rule" "alb_https" {
   description       = "HTTPS from internet"
 }
 
+
+# Temporary HTTP access for assignment demonstration
+resource "aws_vpc_security_group_ingress_rule" "alb_http" {
+  security_group_id = aws_security_group.alb.id
+  cidr_ipv4         = "0.0.0.0/0"
+  from_port         = 80
+  to_port           = 80
+  ip_protocol       = "tcp"
+  description       = "Temporary HTTP access for assignment demo"
+}
+
+
 resource "aws_vpc_security_group_egress_rule" "alb_to_api" {
   security_group_id            = aws_security_group.alb.id
   referenced_security_group_id = aws_security_group.api.id
-  from_port                    = 80
-  to_port                      = 80
+  from_port                    = 3000
+  to_port                      = 3000
   ip_protocol                  = "tcp"
-  description                  = "HTTP to API servers"
+  description                  = "HTTP to Node.js API servers on port 3000"
 }
 
 # API EC2 Instances
@@ -42,10 +54,10 @@ resource "aws_security_group" "api" {
 resource "aws_vpc_security_group_ingress_rule" "api_from_alb" {
   security_group_id            = aws_security_group.api.id
   referenced_security_group_id = aws_security_group.alb.id
-  from_port                    = 80
-  to_port                      = 80
+  from_port                    = 3000
+  to_port                      = 3000
   ip_protocol                  = "tcp"
-  description                  = "HTTP from ALB"
+  description                  = "Node.js API traffic from ALB"
 }
 
 resource "aws_vpc_security_group_egress_rule" "api_to_db" {
