@@ -1,4 +1,3 @@
-
 const express = require("express");
 const router = express.Router();
 
@@ -8,8 +7,21 @@ const {
   getExamQuestions
 } = require("../controllers/examController");
 
-router.post("/", createExam);
+const {
+  authenticate,
+  authorize
+} = require("../middleware/authMiddleware");
+
+// Public endpoints
 router.get("/", getExams);
 router.get("/:id/questions", getExamQuestions);
+
+// Only tutors and admins can create exams
+router.post(
+  "/",
+  authenticate,
+  authorize("tutor", "admin"),
+  createExam
+);
 
 module.exports = router;

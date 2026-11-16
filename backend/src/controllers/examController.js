@@ -7,10 +7,11 @@ exports.createExam = async (req, res) => {
     const {
       title,
       description,
-      created_by,
       start_time,
       duration_minutes
     } = req.body;
+
+    const created_by = req.user.id;
 
     if (!title || !created_by || !start_time ||
         !Number.isInteger(duration_minutes) ||

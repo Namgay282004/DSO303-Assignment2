@@ -158,15 +158,78 @@ jobs:
 
           echo "Created launch template version $NEW_VERSION"
 
+          # Wait until any previous instance refresh finishes.
+          for i in $(seq 1 60); do
+            STATUS=$(aws autoscaling describe-instance-refreshes \
+              --auto-scaling-group-name "$ASG_NAME" \
+              --query 'InstanceRefreshes[0].Status' \
+              --output text)
+
+            echo "Previous instance refresh: $STATUS"
+
+            case "$STATUS" in
+              Pending|InProgress|Cancelling|RollbackInProgress|Baking)
+                sleep 30
+                ;;
+              *)
+                break
+                ;;
+            esac
+
+            if [ "$i" -eq 60 ]; then
+              echo "::error::Previous instance refresh did not finish"
+              exit 1
+            fi
+          done
+
+          # Update the Auto Scaling Group to the new image version.
           aws autoscaling update-auto-scaling-group \
             --auto-scaling-group-name "$ASG_NAME" \
             --launch-template "LaunchTemplateId=$LT_ID,Version=$NEW_VERSION"
 
+          # DesiredConfiguration is required for automatic rollback.
+          DESIRED_CONFIG=$(jq -nc \
+            --arg id "$LT_ID" \
+            --arg version "$NEW_VERSION" \
+            '{LaunchTemplate:{LaunchTemplateId:$id,Version:$version}}')
+
           aws autoscaling start-instance-refresh \
             --auto-scaling-group-name "$ASG_NAME" \
+            --desired-configuration "$DESIRED_CONFIG" \
             --preferences '{"MinHealthyPercentage":100,"MaxHealthyPercentage":200,"InstanceWarmup":180,"AutoRollback":true}'
 
-          echo "Backend deployment started."
+          echo "Waiting for backend deployment to finish..."
+
+          REFRESH_ID=$(aws autoscaling describe-instance-refreshes \
+            --auto-scaling-group-name "$ASG_NAME" \
+            --query 'InstanceRefreshes[0].InstanceRefreshId' \
+            --output text)
+
+          for i in $(seq 1 60); do
+            STATUS=$(aws autoscaling describe-instance-refreshes \
+              --auto-scaling-group-name "$ASG_NAME" \
+              --instance-refresh-ids "$REFRESH_ID" \
+              --query 'InstanceRefreshes[0].Status' \
+              --output text)
+
+            echo "Deployment status: $STATUS"
+
+            case "$STATUS" in
+              Successful)
+                echo "Backend deployment completed successfully."
+                exit 0
+                ;;
+              Failed|Cancelled|RollbackSuccessful|RollbackFailed)
+                echo "::error::Backend deployment ended with status $STATUS"
+                exit 1
+                ;;
+            esac
+
+            sleep 30
+          done
+
+          echo "::error::Backend deployment verification timed out"
+          exit 1
 
   deploy-frontend:
     name: Deploy React Frontend
