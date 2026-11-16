@@ -193,16 +193,40 @@ resource "aws_iam_role_policy" "github_launch_template_deploy" {
       {
         Effect = "Allow"
         Action = [
-          "autoscaling:DescribeAutoScalingGroups"
+          "autoscaling:DescribeAutoScalingGroups",
+          "autoscaling:DescribeInstanceRefreshes"
         ]
         Resource = "*"
       },
       {
         Effect = "Allow"
         Action = [
-          "autoscaling:UpdateAutoScalingGroup"
+          "autoscaling:UpdateAutoScalingGroup",
+          "autoscaling:StartInstanceRefresh"
         ]
         Resource = aws_autoscaling_group.api.arn
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "github_ec2_passrole" {
+  name = "DSO303-GitHub-EC2-PassRole"
+  role = aws_iam_role.github_deploy.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["iam:PassRole"]
+        Resource = aws_iam_role.api.arn
+
+        Condition = {
+          StringEquals = {
+            "iam:PassedToService" = "ec2.amazonaws.com"
+          }
+        }
       }
     ]
   })
