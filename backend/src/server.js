@@ -55,6 +55,12 @@ app.get("/api/db-health", async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 
+
+app.use(
+  "/api/notifications",
+  require("./routes/notificationRoutes")
+);
+
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`API running on port ${PORT}`);
 });

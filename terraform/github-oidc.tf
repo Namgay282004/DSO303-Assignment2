@@ -3,6 +3,9 @@
 # DSO303 Assignment 2 - GitHub Actions OIDC
 # ==========================================================
 
+# Get the AWS account ID dynamically
+data "aws_caller_identity" "current" {}
+
 # ----------------------------------------------------------
 # 1. GitHub Actions OIDC Identity Provider
 # ----------------------------------------------------------
@@ -225,6 +228,75 @@ resource "aws_iam_role_policy" "github_ec2_passrole" {
         Condition = {
           StringEquals = {
             "iam:PassedToService" = "ec2.amazonaws.com"
+          }
+        }
+      }
+    ]
+  })
+}
+
+# Allow GitHub Actions to launch EC2 instances
+# using the API launch template.
+
+resource "aws_iam_role_policy" "github_ec2_launch" {
+  name = "DSO303-GitHub-EC2-Launch"
+  role = aws_iam_role.github_deploy.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+
+    Statement = [
+      {
+        Sid    = "AllowRunInstances"
+        Effect = "Allow"
+
+        Action = [
+          "ec2:RunInstances"
+        ]
+
+        Resource = [
+          "arn:aws:ec2:ap-south-1::image/*",
+          "arn:aws:ec2:ap-south-1:${data.aws_caller_identity.current.account_id}:instance/*",
+          "arn:aws:ec2:ap-south-1:${data.aws_caller_identity.current.account_id}:volume/*",
+          "arn:aws:ec2:ap-south-1:${data.aws_caller_identity.current.account_id}:network-interface/*",
+          "arn:aws:ec2:ap-south-1:${data.aws_caller_identity.current.account_id}:subnet/*",
+          "arn:aws:ec2:ap-south-1:${data.aws_caller_identity.current.account_id}:security-group/*",
+          "arn:aws:ec2:ap-south-1:${data.aws_caller_identity.current.account_id}:launch-template/*"
+        ]
+
+        Condition = {
+          ArnEquals = {
+            "ec2:LaunchTemplate" = aws_launch_template.api.arn
+          }
+        }
+      }
+    ]
+  })
+}
+
+# Allow tags on instances created by the deployment.
+
+resource "aws_iam_role_policy" "github_ec2_tags" {
+  name = "DSO303-GitHub-EC2-Tags"
+  role = aws_iam_role.github_deploy.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+
+    Statement = [
+      {
+        Sid    = "AllowTagsOnNewEC2Instances"
+        Effect = "Allow"
+
+        Action = [
+          "ec2:CreateTags"
+        ]
+
+        Resource = "arn:aws:ec2:ap-south-1:${data.aws_caller_identity.current.account_id}:instance/*"
+
+        Condition = {
+          StringEquals = {
+            "ec2:CreateAction" = "RunInstances"
           }
         }
       }

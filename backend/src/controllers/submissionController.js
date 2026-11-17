@@ -1,3 +1,4 @@
+const { queueAssignment } = require("../services/assignmentQueue");
 
 const crypto = require("crypto");
 const pool = require("../config/db");
@@ -233,9 +234,23 @@ exports.confirmUpload = async (req, res) => {
 
     await client.query("COMMIT");
 
+    // Queue asynchronous assignment processing after saving.
+    let processingQueued = false;
+
+    try {
+      await queueAssignment(result.rows[0].id);
+      processingQueued = true;
+    } catch (queueError) {
+      console.error(
+        "Assignment processing queue failed:",
+        queueError.message
+      );
+    }
+
     return res.status(201).json({
       message: "File submitted successfully",
-      submission: result.rows[0]
+      submission: result.rows[0],
+      processing_queued: processingQueued
     });
 
   } catch (error) {

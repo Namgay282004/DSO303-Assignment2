@@ -1,3 +1,4 @@
+import Notifications from "./pages/Notifications.jsx";
 
 import {
   BrowserRouter,
@@ -26,6 +27,7 @@ export default function App() {
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/exam/:id" element={<TakeExam />} />
         <Route path="/results" element={<Results />} />
+        <Route path="/notifications" element={<Notifications />} />
       </Routes>
     </BrowserRouter>
   );

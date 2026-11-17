@@ -182,11 +182,6 @@ jobs:
             fi
           done
 
-          # Update the Auto Scaling Group to the new image version.
-          aws autoscaling update-auto-scaling-group \
-            --auto-scaling-group-name "$ASG_NAME" \
-            --launch-template "LaunchTemplateId=$LT_ID,Version=$NEW_VERSION"
-
           # DesiredConfiguration is required for automatic rollback.
           DESIRED_CONFIG=$(jq -nc \
             --arg id "$LT_ID" \

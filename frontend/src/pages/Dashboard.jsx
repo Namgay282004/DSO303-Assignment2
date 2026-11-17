@@ -59,6 +59,14 @@ export default function Dashboard() {
         >
           View My Results
         </button>
+        <button
+          className="start-btn"
+          style={{ maxWidth: "200px", marginBottom: "24px" }}
+          onClick={() => navigate("/notifications")}
+        >
+          Tutor Notifications
+        </button>
+
         <h2>Available Examinations</h2>
         <p>View your published examinations below.</p>
 
