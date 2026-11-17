@@ -1,4 +1,4 @@
-# DSO303 Assignment 2 – Architecture Design and Deployment
+# DSO303 Assignment 2 : Architecture Design and Deployment
 
 ## University Online Examination and Assignment Submission Platform
 
@@ -157,13 +157,7 @@ terraform plan \
   -var="db_multi_az=true"
 ```
 
-Apply only after reviewing the complete plan:
-
-```bash
-terraform apply \
-  -var="enable_nat_gateways=true" \
-  -var="db_multi_az=true"
-```
+Do **not** run `terraform apply` on the live deployment until the launch-template drift and full plan have been reviewed and reconciled.
 
 **Important:** The current AWS deployment includes launch template changes made outside Terraform. The configuration must be reconciled before applying a full Terraform plan. An unreviewed apply could replace the working launch template configuration.
 
@@ -185,9 +179,7 @@ The workflow includes:
 - Frontend deployment to Amazon S3.
 - CloudFront cache invalidation.
 
-The backend has been deployed successfully through a manually initiated AWS instance refresh.
-
-Automatic end-to-end redeployment following a push to `main` is still being verified.
+A push to `main` successfully completed all three GitHub Actions jobs: build, backend ECR publication and Auto Scaling instance refresh, and frontend S3 deployment with CloudFront invalidation. See `evidence/cicd/github-actions-success.png`.
 
 ### 9. Current AWS Deployment
 
@@ -204,7 +196,7 @@ The project has deployed infrastructure including:
 
 The backend `/health` endpoint has returned HTTP 200 through the Application Load Balancer.
 
-Not all application features, database failover behavior, S3 uploads, or asynchronous processing have been verified end to end in AWS.
+Verified in AWS: frontend and API HTTP 200 health checks, RDS database connectivity, exam submission and SQS-driven MCQ marking, 40 MB presigned S3 uploads and database confirmation, SQS-driven assignment processing and a tutor notification database record. Live AZ failover, peak throughput and email delivery were not verified.
 
 ### 10. Testing and Evidence
 
@@ -214,6 +206,24 @@ Evidence is organized into:
 - `evidence/aws-deployment/`
 - `evidence/cicd/`
 - `evidence/terraform/`
+
+### 10.1 AWS Console evidence 
+
+The following screenshots are original AWS Console captures of the deployed configuration:
+
+| Component | Evidence |
+|---|---|
+| VPC and six subnets in two AZs | [VPC resource map](evidence/aws-deployment/vpc-resource-map.png), [subnet list](evidence/aws-deployment/vpc-subnets.png) |
+| RDS PostgreSQL Multi-AZ | [RDS configuration](evidence/aws-deployment/rds-multi-az.png) |
+| EC2 Auto Scaling | [ASG details](evidence/aws-deployment/auto-scaling-group.png), [healthy instance](evidence/aws-deployment/ec2-instance.png) |
+| ALB and target group | [Resource map](evidence/aws-deployment/alb-resource-map.png), [healthy target](evidence/aws-deployment/alb-target-group.png) |
+| 40 MB S3 objects | [S3 submission objects](evidence/aws-deployment/s3-submissions.png) |
+| SQS and DLQ | [Main queue](evidence/aws-deployment/sqs-marking-queue.png), [DLQ](evidence/aws-deployment/sqs-dead-letter-queue.png) |
+| CloudFront and ECR | [CloudFront](evidence/aws-deployment/cloudfront-distribution.png), [ECR images](evidence/aws-deployment/ecr-images.png) |
+| Automatic deployment | [GitHub Actions success](evidence/cicd/github-actions-success.png) |
+| Background assignment processing | [Database verification](evidence/aws-deployment/assignment-processing-test.md) |
+
+The AWS screenshots establish resource configuration; application test records provide separate evidence of functional behavior.
 
 Additional testing documentation is available in:
 
@@ -263,12 +273,12 @@ terraform destroy \
 
 The Cloud Architecture Lab simulations demonstrate modeled system behavior. They do not prove production performance.
 
-The deployed AWS application still requires further verification of some features, including full assignment uploads, asynchronous processing, automatic CI/CD redeployment, and production recovery targets.
+The 40 MB upload, asynchronous worker and automatic GitHub Actions deployment have been verified. Remaining gaps: result-release email, measured peak capacity and real AWS failover/RPO/RTO, a verified 30-second periodic autosave schedule (the UI currently saves about 700 ms after a change), five-year retention enforcement, and end-to-end HTTPS on the API path. The current Auto Scaling desired capacity of one does not guarantee uninterrupted service during an AZ failure.
 
 ### 13. Conclusion
 
-This project demonstrates the design and partial deployment verification of a scalable university examination and assignment submission platform using AWS.
+This project demonstrates the design and tested AWS deployment of a scalable university examination and assignment submission platform using AWS.
 
 It combines cloud architecture design, infrastructure as code, containerization, simulated failure testing, and a CI/CD workflow.
 
-The repository contains the architecture documentation, implementation code, and evidence needed to review the completed work and remaining deployment limitations.
+The repository includes architecture documentation, implementation code, screenshots and test evidence, with unverified production targets clearly identified.

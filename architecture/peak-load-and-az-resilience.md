@@ -1,5 +1,14 @@
-
 # Peak Load and Availability Zone Resilience
+
+## Required design explanation
+
+The platform is designed for 300–500 normal concurrent users and a peak of 3,000 exam starts within five minutes. CloudFront caches frontend files, the Application Load Balancer distributes API traffic, and EC2 Auto Scaling can add API instances when configured scaling policies and capacity permit. The API stores answers in PostgreSQL; SQS queues marking and assignment processing so slower background jobs do not block interactive requests. Answer saves should be durable and retried when connections fail.
+
+The VPC spans two Availability Zones, with public subnets for the ALB, private subnets for application instances, and isolated subnets for the database. If an AZ fails, the ALB can route to healthy instances in the other AZ, provided sufficient instances are already running or replacement instances launch. RDS Multi-AZ maintains a standby and supports database failover. Cloud Architecture Lab successfully simulated failures in both AZs.
+
+**Limits of the evidence:** RDS Multi-AZ and the two-AZ subnet design are deployed, but the ASG had only one desired instance. Therefore uninterrupted real-AWS AZ-loss operation is not demonstrated. The 99.9% availability, five-minute RPO, one-hour RTO and 3,000-student peak remain unmeasured targets, not verified service-level results.
+
+## Supporting analysis and evidence
 
 ## 1. Peak Load Handling
 
@@ -58,3 +67,7 @@ The proposed architecture improves scalability and reliability through load bala
 Cloud Architecture Lab simulations demonstrated successful request handling during modeled failure scenarios.
 
 Further production testing is required to confirm the proposed performance and recovery objectives.
+
+## 5. Deployed configuration evidence
+
+The [VPC resource map](../evidence/aws-deployment/vpc-resource-map.png), [RDS Multi-AZ configuration](../evidence/aws-deployment/rds-multi-az.png), [Auto Scaling Group](../evidence/aws-deployment/auto-scaling-group.png) and [ALB healthy target](../evidence/aws-deployment/alb-target-group.png) document the actual deployment. The ASG had one desired instance, so surviving an AZ failure without interruption remains a **design objective**, not a demonstrated AWS result.

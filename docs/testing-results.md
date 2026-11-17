@@ -1,15 +1,10 @@
-
 # Testing Results
-
-**Course:** DSO303 – Cloud Computing  
-**Assignment:** Assignment 2 – Architecture Design and Deployment  
-**Project:** University Online Examination and Assignment Submission Platform
 
 ## 1. Introduction
 
 This document records the testing performed on the University Examination Platform, including backend API testing, PostgreSQL database testing, frontend testing, Docker integration, GitHub Actions CI, and Cloud Architecture Lab simulations.
 
-The application was implemented and tested locally. The proposed AWS architecture was evaluated using Terraform planning and Cloud Architecture Lab simulations.
+The application was tested locally, in Cloud Architecture Lab, and on deployed AWS resources. This report separates observed functional tests from architecture-only simulations and unverified production targets.
 
 ## 2. Backend and Database Testing
 
@@ -174,7 +169,7 @@ The GitHub Actions workflow completed successfully in approximately 27 seconds.
 
 ![GitHub Actions Success](../evidence/cicd/github-actions-success.png)
 
-**Figure 15:** Successful GitHub Actions workflow showing repository checkout, Docker Buildx setup, and backend and frontend Docker image builds.
+**Figure 15:** Successful GitHub Actions workflow with build, backend publication/deployment and frontend deployment jobs.
 
 The workflow reported one warning and one notice, but the build job succeeded.
 
@@ -257,24 +252,55 @@ PostgreSQL queries confirmed that the student's examination answer was stored wi
 
 The released result was also displayed successfully on the student results page, as shown in Figure 10.
 
-## 8. Known Limitations
+## 8. AWS Deployment and End-to-End Verification (17 November 2026)
 
-- The complete AWS production architecture has not been deployed.
-- The current frontend primarily supports student operations.
-- Tutor marking and result release do not yet have a complete frontend workflow.
-- The existing attempt restriction prevents starting another attempt for the same examination.
-- Large-scale performance testing with 3,000 concurrent students has not been demonstrated.
-- The GitHub Actions workflow builds Docker images but does not automatically deploy them.
-- Actual Multi-AZ failover performance and recovery objectives remain unverified on AWS.
+| Test | Observed result | Evidence | Status |
+|---|---|---|---|
+| ALB backend `/health` | HTTP 200 | Recorded terminal test; [ALB map](../evidence/aws-deployment/alb-resource-map.png) | Passed |
+| Backend `/api/db-health` | HTTP 200 | Recorded terminal test; [RDS Multi-AZ](../evidence/aws-deployment/rds-multi-az.png) | Passed |
+| CloudFront frontend | HTTP 200 | Recorded terminal test; [CloudFront](../evidence/aws-deployment/cloudfront-distribution.png) | Passed |
+| Unauthenticated tutor notifications API | HTTP 401 | Recorded terminal test | Passed (expected denial) |
+| MCQ marking | Submitted exam attempt 2; worker stored total 5 and obtained 5, unreleased | Recorded PostgreSQL verification | Passed |
+| 40 MB assignment upload | Two 40.0 MB objects visible under assignments/1/students/6/; submission 2 confirmed in database | [S3 screenshot](../evidence/aws-deployment/s3-submissions.png) | Passed |
+| SQS assignment worker | Submission 2 changed to `processing`; notification 1 created for tutor user 4 | [Processing test](../evidence/aws-deployment/assignment-processing-test.md) | Passed |
+| Main SQS and DLQ | Standard SSE-SQS queue and DLQ configured | [Queue](../evidence/aws-deployment/sqs-marking-queue.png), [DLQ](../evidence/aws-deployment/sqs-dead-letter-queue.png) | Configured |
+| EC2 and ALB target health | ASG instance InService/Healthy; ALB target 1 healthy, 0 unhealthy | [EC2](../evidence/aws-deployment/ec2-instance.png), [target](../evidence/aws-deployment/alb-target-group.png) | Passed at capture time |
+| Push-to-main CI/CD | All three jobs succeeded, backend ECR/ASG and frontend S3/CloudFront deployed | [GitHub Actions](../evidence/cicd/github-actions-success.png), [ECR](../evidence/aws-deployment/ecr-images.png) | Passed |
+| Two-AZ network and RDS | Six subnets across two AZs; RDS Multi-AZ Yes | [VPC](../evidence/aws-deployment/vpc-resource-map.png), [subnets](../evidence/aws-deployment/vpc-subnets.png), [RDS](../evidence/aws-deployment/rds-multi-az.png) | Configured |
 
-## 9. Conclusion
+### 8.1 Screenshots of the deployed environment
 
-The implemented application passed the recorded backend, frontend, database, and Docker integration checks.
+![VPC resource map](../evidence/aws-deployment/vpc-resource-map.png)
 
-The frontend, backend, and PostgreSQL database communicate successfully through Docker Compose.
+*Figure 22. Two-AZ VPC and six subnets.*
 
-GitHub Actions successfully builds the backend and frontend Docker images.
+![RDS Multi-AZ](../evidence/aws-deployment/rds-multi-az.png)
 
-Cloud Architecture Lab simulations demonstrate the proposed architecture's modeled examination retrieval, asynchronous assignment processing, and failover behavior.
+*Figure 23. PostgreSQL Multi-AZ enabled.*
 
-Further work is required before claiming production readiness or full AWS deployment.
+![ALB target group](../evidence/aws-deployment/alb-target-group.png)
+
+*Figure 24. Healthy backend target on port 3000.*
+
+![S3 40 MB uploads](../evidence/aws-deployment/s3-submissions.png)
+
+*Figure 25. Uploaded assignment objects in S3.*
+
+![GitHub Actions successful deployment](../evidence/cicd/github-actions-success.png)
+
+*Figure 26. Successful build, backend deployment and frontend deployment jobs.*
+
+## 9. Known Limitations and Unverified Requirements
+
+- Cloud Architecture Lab AZ failover was simulated; no measured AWS AZ-loss recovery, 99.9% uptime, 5-minute RPO or 1-hour RTO has been demonstrated.
+- 3,000 students starting exams within five minutes has not been load-tested.
+- The frontend saves changed answers after a 700 ms debounce; a periodic 30-second autosave interval was not found in the reviewed code.
+- A tutor notification was inserted into PostgreSQL, but browser delivery for that specific record and email on result release were not verified.
+- The API ALB uses HTTP port 80. Encryption in transit across the full application path is not established by these screenshots.
+- Five-year record retention is not configured or verified; the reviewed RDS Terraform has zero backup retention days.
+- The desired EC2 ASG capacity is one, so loss of its AZ may involve a replacement delay.
+- Terraform/launch-template drift limits fully unattended reproducibility until reconciled.
+
+## 10. Conclusion
+
+The tests establish that the deployed AWS frontend and backend were reachable, RDS was connected and Multi-AZ configured, 40 MB S3 uploads succeeded, asynchronous SQS processing updated the database and created a tutor notification, and a push-to-main GitHub Actions workflow deployed both application components. Remaining reliability, security and feature gaps are stated above rather than presented as verified results.

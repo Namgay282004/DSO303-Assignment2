@@ -1,9 +1,5 @@
 # AWS Service Documentation
 
-**Course:** DSO303 – Cloud Computing  
-**Assignment:** Assignment 2 – Architecture Design and Deployment  
-**Project:** University Online Examination and Assignment Submission Platform
-
 ## 1. Introduction
 
 This document describes the AWS services selected for the university's online examination and assignment submission platform.
@@ -28,7 +24,7 @@ The architecture uses two Availability Zones to improve reliability, scalability
 | Isolated Database Subnets | Host the primary and standby databases. | Prevent direct internet access, unlike deploying a database in public subnets. | RDS PostgreSQL, EC2 |
 | Amazon Route 53 | Provides DNS resolution for the application. | Managed DNS with integration into AWS services, compared with manually maintained DNS infrastructure. | CloudFront |
 | Amazon CloudFront | Delivers frontend files and forwards API requests. | Reduces latency and origin traffic compared with serving all frontend assets directly from EC2. | Route 53, S3, ALB, WAF |
-| Application Load Balancer | Distributes HTTPS requests across API instances in two AZs. | Supports HTTP routing and health checks, unlike a basic TCP-only load-balancing approach. | CloudFront, EC2 |
+| Application Load Balancer | Distributes HTTP requests to the deployed API target group; HTTPS is a future security improvement. | Supports HTTP routing and health checks, unlike a basic TCP-only load-balancing approach. | CloudFront, EC2 |
 | NAT Gateway | Provides outbound internet access for private EC2 instances. | Avoids managing NAT instances and provides a managed outbound networking service. | Private subnets, EC2 |
 
 ### 2.2 Compute and Scaling
@@ -52,7 +48,7 @@ The architecture uses two Availability Zones to improve reliability, scalability
 
 | AWS Service | Role | Why over an alternative | Connects to |
 |---|---|---|---|
-| Amazon Cognito | Authenticates students, tutors, and administrators. | Provides managed user authentication instead of implementing a custom identity system. | Frontend, API |
+| Amazon Cognito | Proposed managed identity service; the deployed application uses JWT authentication instead. | Provides managed user authentication instead of implementing a custom identity system. | Frontend, API |
 | AWS WAF | Protects the application against common web attacks. | Provides managed filtering rules instead of relying only on application-level checks. | CloudFront |
 | AWS Certificate Manager | Manages TLS certificates for HTTPS. | Reduces manual certificate renewal and management. | CloudFront, ALB |
 | AWS IAM | Controls permissions between AWS services. | Role-based temporary credentials are safer than hardcoded access keys. | EC2, S3, SQS, SES |
@@ -63,7 +59,7 @@ The architecture uses two Availability Zones to improve reliability, scalability
 | AWS Service | Role | Why over an alternative | Connects to |
 |---|---|---|---|
 | Amazon SQS | Queues marking and notification jobs. | More reliable during traffic spikes than processing every background task synchronously. | API EC2, Marking Worker |
-| Amazon SES | Sends tutor notifications and released examination results by email. | Managed email delivery avoids operating a custom SMTP server. | Marking Worker |
+| Amazon SES | Proposed service for result-release email; not implemented in the verified deployment. | Managed email delivery avoids operating a custom SMTP server. | Marking Worker |
 | Amazon CloudWatch | Collects application metrics, logs, and alarms. | Centralized monitoring is easier to manage than manually collecting logs from each server. | EC2, ALB, RDS, Auto Scaling |
 
 ### 2.6 CI/CD Services
@@ -75,11 +71,11 @@ The architecture uses two Availability Zones to improve reliability, scalability
 | AWS CodeBuild | Builds and tests application code. | Managed build environments avoid maintaining dedicated build servers. | CodePipeline |
 | AWS CodeDeploy | Deploys application updates to EC2 instances. | Supports controlled deployments and rollback mechanisms compared with manual SSH deployment. | EC2, CodePipeline |
 
-**Implementation note:** The Lab diagram shows AWS CodeCommit and CodePipeline. For the actual GitHub repository, GitHub Actions may be used to trigger AWS deployment automatically on pushes to `main`. The final documentation must match whichever CI/CD implementation is actually deployed.
+**Implementation note:** The Lab diagram shows AWS CodeCommit and CodePipeline. For the actual GitHub repository, GitHub Actions triggers AWS deployment automatically on pushes to `main`. The deployed CI/CD pipeline uses GitHub Actions with OIDC, ECR, EC2 Auto Scaling instance refresh, S3, and CloudFront. AWS CodeCommit/CodePipeline/CodeBuild/CodeDeploy remain diagram-level alternatives, not the deployed pipeline.
 
 ## 3. Important Service Configurations
 
-| Component | Planned configuration |
+| Component | Configuration (deployed where verified; otherwise target) |
 |---|---|
 | VPC | `10.0.0.0/16` |
 | Public Subnet A | `10.0.1.0/24` |
@@ -88,12 +84,12 @@ The architecture uses two Availability Zones to improve reliability, scalability
 | Private App Subnet B | `10.0.4.0/24` |
 | Isolated DB Subnet A | `10.0.5.0/24` |
 | Isolated DB Subnet B | `10.0.6.0/24` |
-| ALB | HTTPS listener, health checks, targets in both AZs |
+| ALB | Deployed HTTP:80 listener; one healthy port-3000 target, ALB enabled across two AZs; HTTPS remains a target |
 | EC2 | Private subnet placement, IAM roles, Auto Scaling |
-| RDS | PostgreSQL, Multi-AZ standby, encryption, automated backups |
-| S3 | Private buckets, encryption, versioning where appropriate, five-year retention lifecycle |
+| RDS | Deployed PostgreSQL, Multi-AZ Yes and encryption enabled; backup retention not established (Terraform currently sets 0 days) |
+| S3 | 40 MB assignment objects verified; five-year lifecycle and versioning not independently verified |
 | SQS | Durable queue, worker polling, retry handling and dead-letter queue |
-| CloudWatch | API errors, latency, EC2 utilization, RDS health and queue-depth alarms |
+| CloudWatch | Intended metrics/alarms; custom monitoring not verified |
 | IAM | Least-privilege permissions for API and marking workers |
 | Secrets Manager | Database credentials stored securely |
 | CI/CD | Automated build, test, deployment and rollback strategy |
@@ -104,17 +100,17 @@ These are the intended production configurations. Settings not demonstrated in C
 
 The architecture uses multiple security controls:
 
-- **Encryption in transit:** HTTPS/TLS protects communication between clients and public application endpoints. Database connections should also use TLS.
+- **Encryption in transit:** CloudFront provides HTTPS for the frontend; the deployed ALB listener is HTTP:80, so end-to-end TLS has not been established. Database TLS use was not independently verified.
 - **Encryption at rest:** RDS and S3 use encryption for stored data.
 - **Network isolation:** API and worker instances run in private subnets, while databases run in isolated subnets.
-- **Access control:** Cognito manages authentication, while application authorization enforces student, tutor, and administrator permissions.
+- **Access control:** The deployed application uses custom JWT authentication and role-based middleware; Cognito appears only in the proposed architecture.
 - **IAM permissions:** API and worker instances receive only the permissions required for their operations.
-- **Data retention:** S3 lifecycle and retention policies are configured to preserve required records for five years.
+- **Data retention:** Five-year record retention is a requirement, not a verified deployed lifecycle policy.
 - **Secrets management:** Database passwords and other sensitive credentials are stored in Secrets Manager.
 
 ## 5. Scalability and Availability
 
-The architecture distributes API servers and marking workers across two Availability Zones.
+The architecture places the API tier in subnets across two Availability Zones. The deployed Auto Scaling Group had one desired instance at capture time; uninterrupted API availability after losing its AZ was not verified.
 
 During examination peaks, EC2 Auto Scaling can increase compute capacity, while CloudFront reduces static-content traffic reaching the backend.
 
@@ -138,63 +134,28 @@ The following simulation results have been observed:
 
 The simulations demonstrate the modeled request paths and failure behavior. They do not replace actual AWS deployment tests.
 
-## 7. Implementation Status
+## 7. Deployed AWS Services and Evidence
 
-The project includes a proposed AWS architecture, Terraform infrastructure configuration, Cloud Architecture Lab simulations, and a locally deployed examination platform.
+| Service or capability | Verified deployment status | Evidence |
+|---|---|---|
+| VPC networking | Six subnets: public, private application, isolated database across ap-south-1a and ap-south-1b; two NAT gateways | [VPC map](../evidence/aws-deployment/vpc-resource-map.png), [subnets](../evidence/aws-deployment/vpc-subnets.png) |
+| EC2 Auto Scaling | One healthy InService t3.micro at capture time; ASG desired 1, limits 0–2; subnets in two AZs | [ASG](../evidence/aws-deployment/auto-scaling-group.png), [instance](../evidence/aws-deployment/ec2-instance.png) |
+| Application Load Balancer | Internet-facing ALB active in two AZs, HTTP:80 forwarding to healthy port-3000 backend | [ALB](../evidence/aws-deployment/alb-resource-map.png), [target health](../evidence/aws-deployment/alb-target-group.png) |
+| RDS PostgreSQL | Available, Multi-AZ Yes, encrypted gp3 storage, secondary AZ ap-south-1a | [RDS](../evidence/aws-deployment/rds-multi-az.png) |
+| S3 submissions | Two 40.0 MB objects under assignments/1/students/6/ | [S3 objects](../evidence/aws-deployment/s3-submissions.png) |
+| SQS | Standard marking queue with SSE-SQS and configured dead-letter queue; assignment worker verified | [SQS](../evidence/aws-deployment/sqs-marking-queue.png), [DLQ](../evidence/aws-deployment/sqs-dead-letter-queue.png), [worker result](../evidence/aws-deployment/assignment-processing-test.md) |
+| CloudFront | Frontend distribution configured; frontend URL returned HTTP 200 | [CloudFront](../evidence/aws-deployment/cloudfront-distribution.png) |
+| ECR | Backend image repository with tagged `latest` image | [ECR](../evidence/aws-deployment/ecr-images.png) |
+| GitHub Actions | Push to main successfully built, published backend image, refreshed ASG, and deployed frontend | [Successful workflow](../evidence/cicd/github-actions-success.png) |
+| Authentication | Application uses custom JWT and role-based middleware, **not** deployed Cognito | [Application code](../backend/src/middleware/authMiddleware.js) |
+| Tutor notification | Database-backed in-app notification created by asynchronous worker; no verified tutor email | [Worker verification](../evidence/aws-deployment/assignment-processing-test.md) |
 
-| Component | Implementation Status |
-|---|---|
-| AWS VPC and subnet networking | Deployed using Terraform |
-| Security groups and IAM | Deployed; GitHub deployment permissions under review |
-| EC2, ALB and Auto Scaling | Deployed; backend health check returned HTTP 200 |
-| Amazon RDS PostgreSQL | Deployed; Multi-AZ configuration and application connectivity require final verification |
-| Amazon S3 | Buckets deployed; assignment upload requires end-to-end verification |
-| Amazon SQS | Queues deployed; production worker processing requires verification |
-| Amazon Cognito | Proposed in architecture; application currently uses JWT authentication |
-| Amazon CloudWatch | Included in architecture; production monitoring requires verification |
-| React frontend | Implemented; hosted through S3 and CloudFront |
-| Express backend | Implemented and deployed on EC2 using Docker |
-| PostgreSQL | Implemented locally and provisioned through Amazon RDS |
-| Docker Compose | Implemented and tested locally |
-| GitHub Actions | Build and deployment workflow configured; automatic redeployment requires verification |
-| AWS production deployment | Partially verified; backend health check successful |
+### 7.1 Proposed or not fully verified capabilities
 
-### 7.1 Local Implementation
+The architecture diagram includes Route 53, WAF, Cognito, SES, CloudWatch and AWS developer services as design components. Do not interpret their appearance in the diagram as proof of deployment. JWT authentication and GitHub Actions are the actual deployed alternatives to Cognito and AWS CodePipeline. SES result-release email is not implemented or verified. Monitoring, WAF configuration and custom DNS were not independently confirmed in this evidence set.
 
-The working application uses React, Express, PostgreSQL, Docker and Nginx.
-
-Student authentication uses JWT-based authentication implemented in the backend rather than Amazon Cognito.
-
-The application supports student login, examination viewing, examination attempts, answer submission and released result viewing.
-
-### 7.2 Cloud Architecture Lab
-
-The Cloud Architecture Lab was used to simulate examination requests, asynchronous processing and Availability Zone failures.
-
-These simulations demonstrate the proposed architecture's behavior but do not represent actual AWS production deployment.
-
-### 7.3 CI/CD Implementation
-
-### 7.3 CI/CD Implementation
-
-GitHub Actions is used for continuous integration and deployment.
-
-The workflow builds Docker images, publishes the backend image to Amazon ECR, manages EC2 launch template versions, starts Auto Scaling instance refreshes, and deploys frontend assets to Amazon S3 with CloudFront cache invalidation.
-
-AWS authentication uses GitHub Actions OIDC.
-
-The backend has been deployed successfully through a manually initiated Auto Scaling instance refresh.
-
-Automatic end-to-end redeployment following a push to the `main` branch has not yet been verified.
-
-### 7.4 Production Limitations
-
-The project includes a locally tested application and a partially verified AWS deployment. The backend is reachable through the Application Load Balancer, while remaining application functions and production recovery targets require further testing.
+The ALB listener is HTTP port 80; therefore the project does not yet demonstrate end-to-end encryption in transit. The ASG has a two-AZ subnet configuration but one running instance at the time of capture; actual AWS AZ-loss recovery was not tested. RDS Multi-AZ is enabled, but no measured production RPO or RTO is available. The Terraform RDS resource currently sets `backup_retention_period = 0`, so five-year records retention is not enforced by that setting.
 
 ## 8. Conclusion
 
-The selected AWS services provide a foundation for a scalable, secure, and highly available university examination platform.
-
-The design combines managed networking, distributed compute, Multi-AZ database availability, object storage, asynchronous processing, monitoring, and automated deployment.
-
-The final AWS implementation will be used to verify the production configurations, upload functionality, notification delivery, scalability, and recovery objectives.
+The service choices cover the requested architecture tiers. The deployed AWS platform verifies the frontend, backend, RDS Multi-AZ configuration, S3 40 MB uploads, SQS processing and GitHub Actions delivery. The table and limitations distinguish deployed resources from proposed design components and untested reliability targets.

@@ -66,3 +66,7 @@ The Cloud Architecture Lab simulation demonstrated successful examination retrie
 Both requests returned HTTP 200 through the proposed architecture.
 
 The results support the feasibility of the designed request flow, but they do not prove production performance or automatic autosave scheduling.
+
+## 6. AWS Implementation Verification
+
+Separate from the Cloud Architecture Lab simulation, a student exam attempt was started, an answer was saved and the attempt was submitted on AWS. The SQS marking worker produced a PostgreSQL result for attempt 2 (5/5 marks, unreleased). The React exam page uses a 700 ms debounce after answer changes, not a verified 30-second recurring timer. These AWS observations support answer persistence and marking but do not prove a 3,000-user peak or RPO/RTO targets. See [Testing Results](../docs/testing-results.md).

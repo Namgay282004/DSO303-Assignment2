@@ -1,165 +1,110 @@
+# Deployment Guide : DSO303 Assignment 2
 
-# Deployment Guide
+## 1. Deployment overview
 
-**Course:** DSO303 – Cloud Computing  
-**Assignment:** Assignment 2  
-**Project:** University Online Examination and Assignment Submission Platform
+The application runs locally using Docker Compose and in AWS using a React frontend on S3/CloudFront, an Express backend container on EC2 behind an ALB, RDS PostgreSQL Multi-AZ, S3 assignment objects, and SQS background processing. GitHub Actions builds and deploys the application when code is pushed to `main`.
 
-## 1. Overview
+![AWS VPC resource map](../evidence/aws-deployment/vpc-resource-map.png)
 
-The University Examination Platform has been implemented locally using Docker Compose.
+*Figure 1. Deployed VPC across two AZs with six subnets, route tables and internet/NAT gateways.*
 
-The application consists of three services:
+## 2. Prerequisites and secrets
 
-- React frontend served through Nginx
-- Node.js and Express backend
-- PostgreSQL database
+Install Git, Docker/Compose, AWS CLI, Terraform, Node.js and GitHub CLI as needed. Use an AWS identity with permissions appropriate to the operations. Keep database passwords, JWT signing keys, IAM credentials and any presigned URLs out of Git. Backend configuration uses environment variables such as `PORT`, `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `JWT_SECRET`, `JWT_EXPIRES_IN`, `AWS_REGION`, `S3_SUBMISSIONS_BUCKET` and `SQS_MARKING_QUEUE_URL`. See application code and environment templates for the actual required names. Do not publish `.env` files.
 
-The frontend communicates with the backend through Nginx. The backend connects to PostgreSQL through a Docker network.
-
-The proposed AWS architecture is documented separately. The complete production architecture has not been deployed to AWS.
-
-## 2. Prerequisites
-
-- Docker and Docker Compose
-- Git
-- Project source code
-- Existing PostgreSQL database container
-- Backend environment configuration
-
-## 3. Environment Configuration
-
-The backend requires the following environment variables:
-
-- PORT
-- DB_HOST
-- DB_PORT
-- DB_USER
-- DB_PASSWORD
-- DB_NAME
-- JWT_SECRET
-- JWT_EXPIRES_IN
-
-The `.env` file must not be committed to GitHub.
-
-## 4. Docker Deployment
-
-From the project root, start the application:
+## 3. Local deployment
 
 ```bash
+git clone https://github.com/Namgay282004/DSO303-Assignment2.git
+cd DSO303-Assignment2
+# Configure backend environment and the existing PostgreSQL container/network first.
 docker compose up -d --build
-```
-
-Verify the services:
-
-```bash
 docker compose ps
+docker compose logs --tail=100
 ```
 
-Find the frontend port:
+The existing local setup connects to a separately managed PostgreSQL container on `dso303-network`. Its database must be available and initialized before the backend can operate. Inspect `docker-compose.yml` before starting or changing volumes.
+
+Test the local backend on the port mapped in `docker-compose.yml` (previously 3001):
 
 ```bash
-docker compose port frontend 80
+curl -i http://localhost:3001/health
+curl -i http://localhost:3001/api/db-health
 ```
 
-Open the returned localhost address in a browser.
+Stop only the Compose-managed services with `docker compose down`. Avoid `down -v` if you need to preserve data.
 
-The current Docker Compose setup uses the existing PostgreSQL container connected to the `dso303-network` network.
+## 4. Terraform infrastructure
 
-The backend and frontend Docker images were built successfully.
-
-![Backend Docker Build](../evidence/aws-deployment/docker-container-backend.png)
-
-**Figure 1:** Successful backend Docker image build.
-
-![Frontend Docker Build](../evidence/aws-deployment/docker-containers-frontend.png)
-
-**Figure 2:** Successful frontend Docker image build.
-
-## 5. Verify the Backend
-
-Check backend health:
+Terraform files in `terraform/` define VPC networking, security groups, ALB, EC2/ASG, RDS, S3, SQS, ECR, IAM, and frontend hosting. Review variable defaults carefully: `db_multi_az` defaults to `false`, although the **deployed** database has Multi-AZ enabled.
 
 ```bash
-curl http://localhost:3001/health
+cd terraform
+terraform init
+terraform fmt -check
+terraform validate
+terraform plan -var='enable_nat_gateways=true' -var='db_multi_az=true'
 ```
 
-Check database connectivity:
+**Do not apply the plan without inspecting it.** GitHub Actions has updated EC2 launch-template versions outside the original Terraform declaration, creating drift. A blind `terraform apply` could roll back a working backend image or modify live infrastructure. Some configuration and secrets are external to this repository; a completely unattended fresh-account deployment has not been demonstrated.
+
+![RDS Multi-AZ configuration](../evidence/aws-deployment/rds-multi-az.png)
+
+*Figure 2. Deployed PostgreSQL database, Multi-AZ enabled and encrypted storage.*
+
+![Auto Scaling configuration](../evidence/aws-deployment/auto-scaling-group.png)
+
+*Figure 3. Backend Auto Scaling Group configuration (one desired instance at capture time).*
+
+![ALB and healthy target](../evidence/aws-deployment/alb-resource-map.png)
+
+*Figure 4. ALB HTTP listener, target group and healthy backend.*
+
+## 5. AWS application verification
+
+Backend ALB: `http://dso303-assignment2-alb-1267647925.ap-south-1.elb.amazonaws.com`  
+Frontend CloudFront: `https://d1aqk07me8w74.cloudfront.net`
 
 ```bash
-curl http://localhost:3001/api/db-health
+curl -i http://dso303-assignment2-alb-1267647925.ap-south-1.elb.amazonaws.com/health
+curl -i http://dso303-assignment2-alb-1267647925.ap-south-1.elb.amazonaws.com/api/db-health
+curl -I https://d1aqk07me8w74.cloudfront.net
 ```
 
-A successful database response includes:
+Previously verified responses were HTTP 200 for all three. Unauthenticated `/api/notifications` returned HTTP 401, as expected. These are observations from the recorded tests, not a guarantee of current uptime.
 
-```json
-{
-  "status": "connected",
-  "database": "university_exams"
-}
-```
+![S3 objects](../evidence/aws-deployment/s3-submissions.png)
 
-## 6. Application Verification
+*Figure 5. Two 40 MB assignment objects stored in S3.*
 
-The following student workflow was verified:
+![SQS queue](../evidence/aws-deployment/sqs-marking-queue.png)
 
-1. Open the student login page.
-2. Authenticate using an existing student account.
-3. View published examinations.
-4. Open examination instructions.
-5. Verify that duplicate attempts are rejected.
-6. View released examination results.
-7. Log out successfully.
+*Figure 6. Encrypted Standard SQS marking queue with dead-letter queue enabled.*
 
-The existing test result displayed 5 out of 15 marks (33.3%).
+See [Testing Results](testing-results.md) for the recorded end-to-end exam, upload, worker and notification tests.
 
-## 7. GitHub Actions CI
+## 6. GitHub Actions continuous delivery
 
-The repository contains:
+Workflow: `.github/workflows/deploy.yml`. A push to `main` runs Docker builds, assumes an AWS IAM role through OIDC, publishes the backend image to ECR, updates the EC2 launch template and triggers an ASG instance refresh. It also builds the React frontend, syncs files to the frontend S3 bucket and creates a CloudFront invalidation. Pull requests run the build checks without deployment.
 
-`.github/workflows/deploy.yml`
+![GitHub Actions deployment](../evidence/cicd/github-actions-success.png)
 
-The workflow runs on pushes to the `main` branch and pull requests.
+*Figure 7. Successful build, backend deployment and React frontend deployment jobs.*
 
-It performs:
+![ECR backend images](../evidence/aws-deployment/ecr-images.png)
 
-1. Repository checkout
-2. Docker Buildx setup
-3. Backend Docker image build
-4. Frontend Docker image build
+*Figure 8. Backend images published to Amazon ECR.*
 
-The GitHub Actions workflow successfully built the backend and frontend Docker images.
+## 7. Safe teardown guidance
 
-![GitHub Actions Success](../evidence/cicd/github-actions-success.png)
+Do not tear down infrastructure before grading or recording the demonstration. First preserve evidence, verify backups and required retention, and review any manually managed resources and Terraform state. From `terraform/`, inspect `terraform plan -destroy -var='enable_nat_gateways=true' -var='db_multi_az=true'` only when deletion is authorized. **Do not run `terraform destroy` as a routine verification step.** NAT gateways, EC2, ALB and RDS can incur ongoing charges.
 
-**Figure 3:** Successful GitHub Actions Docker CI workflow.
+## 8. Known limitations
 
-The workflow validates Docker image builds but does not deploy the application to AWS.
-
-## 8. Stop the Application
-
-Stop the Compose-managed services:
-
-```bash
-docker compose down
-```
-
-Do not use `docker compose down -v` when preserving database volumes.
-
-The existing PostgreSQL container is managed separately and must not be deleted.
-
-## 9. AWS Architecture Status
-
-The project includes Terraform infrastructure configuration and Cloud Architecture Lab simulations.
-
-The proposed production architecture includes VPC networking, EC2 Auto Scaling, Application Load Balancer, RDS Multi-AZ, S3, SQS, IAM, CloudWatch, and related services.
-
-The local Docker deployment and Cloud Architecture Lab simulations provide implementation and architecture evidence. They do not demonstrate a complete production AWS deployment.
-
-## 10. Conclusion
-
-The University Examination Platform was successfully containerized and tested using Docker Compose.
-
-The frontend, backend, and PostgreSQL database communicate successfully.
-
-GitHub Actions automatically verifies the backend and frontend Docker image builds.
+- Real AWS failover, 3,000-student load and RPO/RTO are not benchmarked.
+- The ASG is configured across two AZs but currently has only one desired instance.
+- The API ALB listener uses HTTP port 80, so end-to-end TLS is not proven.
+- Results-release email is not implemented; the verified tutor notification is in-app/database-backed.
+- The UI saves answers after approximately 700 ms of inactivity; a strict 30-second periodic autosave is not implemented in the reviewed code.
+- Five-year retention and all production security controls are not enforced by the reviewed Terraform configuration.
+- Terraform launch-template drift requires reconciliation before claiming fully reproducible unattended infrastructure deployment.

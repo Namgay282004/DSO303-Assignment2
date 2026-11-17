@@ -90,3 +90,13 @@ The simulated API request, IAM authorization, SQS message delivery, and marking 
 The student received HTTP 202, with a reported simulation response time of 89 milliseconds.
 
 Further testing is required to verify actual file uploads, database persistence, and notification delivery in a deployed environment.
+
+## 7. AWS Implementation Verification
+
+A separate AWS test uploaded a 40 MB ZIP file using an S3 presigned URL and confirmed submission ID 2 in PostgreSQL. Two 40.0 MB objects are visible in the submission bucket. An SQS `PROCESS_ASSIGNMENT` message was processed by the worker; the submission changed to `processing` and notification ID 1 was created for tutor user ID 4 with type `ASSIGNMENT_SUBMITTED`. This verifies a database-backed tutor notification, **not** delivery of an email or a verified browser display of the specific notification.
+
+![S3 assignment upload objects](../evidence/aws-deployment/s3-submissions.png)
+
+*Figure 3. Two 40 MB assignment objects in the S3 bucket.*
+
+See [Assignment Processing Test](../evidence/aws-deployment/assignment-processing-test.md) and [Testing Results](../docs/testing-results.md).
