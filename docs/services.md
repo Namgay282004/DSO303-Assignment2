@@ -144,19 +144,20 @@ The project includes a proposed AWS architecture, Terraform infrastructure confi
 
 | Component | Implementation Status |
 |---|---|
-| AWS VPC and subnet networking | Configured using Terraform |
-| Security groups and IAM | Infrastructure configuration prepared |
-| EC2, ALB and Auto Scaling | Proposed architecture and infrastructure configuration |
-| Amazon RDS Multi-AZ | Proposed architecture and simulated behavior |
-| Amazon S3 and SQS | Proposed architecture and simulated workflows |
-| Amazon Cognito | Proposed authentication service; not integrated into the local application |
-| Amazon CloudWatch | Proposed monitoring service |
-| React frontend | Implemented and tested locally |
-| Express backend | Implemented and tested locally |
-| PostgreSQL | Running locally using Docker |
-| Docker Compose | Implemented and verified |
-| GitHub Actions | Docker image builds completed successfully |
-| AWS production deployment | Not completed |
+| AWS VPC and subnet networking | Deployed using Terraform |
+| Security groups and IAM | Deployed; GitHub deployment permissions under review |
+| EC2, ALB and Auto Scaling | Deployed; backend health check returned HTTP 200 |
+| Amazon RDS PostgreSQL | Deployed; Multi-AZ configuration and application connectivity require final verification |
+| Amazon S3 | Buckets deployed; assignment upload requires end-to-end verification |
+| Amazon SQS | Queues deployed; production worker processing requires verification |
+| Amazon Cognito | Proposed in architecture; application currently uses JWT authentication |
+| Amazon CloudWatch | Included in architecture; production monitoring requires verification |
+| React frontend | Implemented; hosted through S3 and CloudFront |
+| Express backend | Implemented and deployed on EC2 using Docker |
+| PostgreSQL | Implemented locally and provisioned through Amazon RDS |
+| Docker Compose | Implemented and tested locally |
+| GitHub Actions | Build and deployment workflow configured; automatic redeployment requires verification |
+| AWS production deployment | Partially verified; backend health check successful |
 
 ### 7.1 Local Implementation
 
@@ -174,15 +175,21 @@ These simulations demonstrate the proposed architecture's behavior but do not re
 
 ### 7.3 CI/CD Implementation
 
-GitHub Actions automatically builds the backend and frontend Docker images when changes are pushed to the `main` branch.
+### 7.3 CI/CD Implementation
 
-The workflow performs continuous integration checks. Automated AWS deployment has not been implemented.
+GitHub Actions is used for continuous integration and deployment.
+
+The workflow builds Docker images, publishes the backend image to Amazon ECR, manages EC2 launch template versions, starts Auto Scaling instance refreshes, and deploys frontend assets to Amazon S3 with CloudFront cache invalidation.
+
+AWS authentication uses GitHub Actions OIDC.
+
+The backend has been deployed successfully through a manually initiated Auto Scaling instance refresh.
+
+Automatic end-to-end redeployment following a push to the `main` branch has not yet been verified.
 
 ### 7.4 Production Limitations
 
-The proposed architecture targets high availability, scalability and fault tolerance. However, actual AWS load testing, Multi-AZ failover, monitoring and recovery performance have not yet been verified.
-
-The current implementation should therefore be described as a locally tested application with a proposed AWS production architecture.
+The project includes a locally tested application and a partially verified AWS deployment. The backend is reachable through the Application Load Balancer, while remaining application functions and production recovery targets require further testing.
 
 ## 8. Conclusion
 
